@@ -104,7 +104,7 @@ PHASE 5 – SUMMARISE: When the seller says goodbye or asks for a summary, speak
 }
 
 // ─── POST /api/chat ──────────────────────────────────────────────────────────
-const GROQ_MODEL = "llama-3.1-8b-instant"; // free, fast
+const GROQ_MODEL = "qwen/qwen3.8-27b"; // ✅ confirmed available & free on Groq
 
 app.post("/api/chat", async (req, res) => {
   const { history } = req.body;
@@ -172,5 +172,5 @@ app.get("*", (_req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n🚀 Snapdeal Virtual KAM running at http://localhost:${PORT}`);
-  console.log(`   API key configured: ${process.env.GEMINI_API_KEY ? "✅ Yes" : "❌ No — set GEMINI_API_KEY in .env"}\n`);
+  console.log(`   API key configured: ${process.env.GROQ_API_KEY ? "✅ Yes" : "❌ No — set GROQ_API_KEY in .env"}\n`);
 });
