@@ -24,6 +24,7 @@ let isBotSpeaking  = false;
 let recognition    = null;
 let currentUtterance = null;
 let sellerData     = null;
+let lastBotUtterance = "";  // for echo cancellation
 let conversationPhase = "idle"; // idle | active | ended
 
 /* ─── DOM refs ───────────────────────────────────────────────────────────────── */
@@ -294,6 +295,13 @@ function startListening() {
     if (!isCallActive) return;
 
     if (finalTranscript.trim()) {
+      // ✅ Echo cancellation: discard if transcript is bot's own voice
+      if (isEcho(finalTranscript.trim())) {
+        console.log("🔇 Echo detected, discarding:", finalTranscript.trim().slice(0, 50));
+        if (isCallActive && !isMuted) startListening();
+        return;
+      }
+
       addMessage("user", finalTranscript.trim());
       setStatus("think", "Priya is thinking…");
       setAvatarState("");
@@ -386,7 +394,13 @@ function speak(text, onDone) {
   // Stop any existing speech
   window.speechSynthesis.cancel();
 
+  // ✅ Fix 1: Stop mic IMMEDIATELY when bot starts speaking
   isBotSpeaking = true;
+  lastBotUtterance = text;   // store for echo cancellation
+  if (recognition) {
+    try { recognition.stop(); } catch(e) {}
+    recognition = null;
+  }
   setStatus("speak", "Priya is speaking…");
   setAvatarState("speaking");
   setWaveform("speaking");
@@ -413,12 +427,11 @@ function speak(text, onDone) {
     setWaveform("");
     setStatus("call", "Call Connected");
     setAvatarState("ringing");
-    // ✅ Fix: Keep isBotSpeaking=true for 900ms so mic doesn't pick up
-    // the echo/residual audio of bot's own voice from speakers
+    // ✅ Fix 2: 1500ms buffer after speech ends before mic turns on
     setTimeout(() => {
       isBotSpeaking = false;
       onDone?.();
-    }, 900);
+    }, 1500);
   };
 
   utterance.onerror = (e) => {
@@ -428,7 +441,7 @@ function speak(text, onDone) {
     setTimeout(() => {
       isBotSpeaking = false;
       onDone?.();
-    }, 900);
+    }, 1500);
   };
 
   // Chrome bug workaround: voices may not load immediately
@@ -572,6 +585,20 @@ function setWaveform(state) {
   if (state) {
     waveform.classList.add("active", state);
   }
+}
+
+/**
+ * Echo cancellation: returns true if `transcript` is likely the mic picking
+ * up the bot's own TTS output. Uses simple word-overlap ratio.
+ */
+function isEcho(transcript) {
+  if (!lastBotUtterance) return false;
+  const botWords  = lastBotUtterance.toLowerCase().split(/\s+/);
+  const userWords = transcript.toLowerCase().split(/\s+/);
+  if (userWords.length < 3) return false; // too short to judge
+  const overlap = userWords.filter(w => botWords.includes(w)).length;
+  const ratio = overlap / userWords.length;
+  return ratio > 0.5; // >50% words match → treat as echo
 }
 
 function escapeHtml(str) {
