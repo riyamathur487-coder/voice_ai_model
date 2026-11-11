@@ -409,20 +409,26 @@ function speak(text, onDone) {
   utterance.volume = 1.0;
 
   utterance.onend = () => {
-    isBotSpeaking = false;
     currentUtterance = null;
     setWaveform("");
     setStatus("call", "Call Connected");
     setAvatarState("ringing");
-    onDone?.();
+    // ✅ Fix: Keep isBotSpeaking=true for 900ms so mic doesn't pick up
+    // the echo/residual audio of bot's own voice from speakers
+    setTimeout(() => {
+      isBotSpeaking = false;
+      onDone?.();
+    }, 900);
   };
 
   utterance.onerror = (e) => {
     console.warn("TTS error:", e);
-    isBotSpeaking = false;
     currentUtterance = null;
     setWaveform("");
-    onDone?.();
+    setTimeout(() => {
+      isBotSpeaking = false;
+      onDone?.();
+    }, 900);
   };
 
   // Chrome bug workaround: voices may not load immediately

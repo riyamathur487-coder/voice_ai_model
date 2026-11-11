@@ -106,13 +106,11 @@ PHASE 5 – SUMMARISE: When the seller says goodbye or asks for a summary, speak
 // ─── POST /api/chat ──────────────────────────────────────────────────────────
 // Model fallback chain — tries newest first, steps down on 503/404/empty
 const MODEL_FALLBACKS = [
-  "gemini-flash-lite-latest",   // ✅ confirmed fast & available
-  "gemini-3.5-flash",           // try step-up models
-  "gemini-3.6-flash",
-  "gemini-3.7-flash",
-  "gemini-3.8-flash",
-  "gemini-flash-latest",
-  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash-lite",      // ✅ fast, cheap, confirmed available
+  "gemini-2.0-flash",           // ✅ step-up, confirmed available
+  "gemini-1.5-flash-8b",        // ✅ lightweight fallback
+  "gemini-1.5-flash",           // ✅ reliable fallback
+  "gemini-2.5-flash-preview-05-20", // preview model
 ];
 
 /** Extract text from any @google/genai response shape */
