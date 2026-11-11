@@ -13,7 +13,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { GoogleGenAI } = require("@google/genai");
+const Groq = require("groq-sdk");
 const path = require("path");
 
 const app = express();
@@ -23,8 +23,8 @@ app.use(express.json());
 // ─── Serve frontend ──────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── Gemini client (new @google/genai SDK — supports AQ. key format) ──────────
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// ─── Groq client ──────────────────────────────────────────────────────────────
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── Seller data injected into every system prompt ───────────────────────────
 // Source: Snapdeal AI First Intern assignment brief (mock data, clearly labelled)
@@ -104,92 +104,46 @@ PHASE 5 – SUMMARISE: When the seller says goodbye or asks for a summary, speak
 }
 
 // ─── POST /api/chat ──────────────────────────────────────────────────────────
-// Model fallback chain — tries newest first, steps down on 503/404/empty
-const MODEL_FALLBACKS = [
-  "gemini-2.0-flash-lite",      // ✅ fast, cheap, confirmed available
-  "gemini-2.0-flash",           // ✅ step-up, confirmed available
-  "gemini-1.5-flash-8b",        // ✅ lightweight fallback
-  "gemini-1.5-flash",           // ✅ reliable fallback
-  "gemini-2.5-flash-preview-05-20", // preview model
-];
-
-/** Extract text from any @google/genai response shape */
-function extractText(result) {
-  // Shape 1: result.text (string getter)
-  if (typeof result.text === "string" && result.text.trim()) return result.text.trim();
-  // Shape 2: candidates[0].content.parts[].text
-  const parts = result.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    const joined = parts.map(p => p.text || "").join("").trim();
-    if (joined) return joined;
-  }
-  // Shape 3: candidates[0].text
-  const ct = result.candidates?.[0]?.text;
-  if (ct) return String(ct).trim();
-  return "";
-}
+const GROQ_MODEL = "llama-3.1-8b-instant"; // free, fast
 
 app.post("/api/chat", async (req, res) => {
   const { history } = req.body;
 
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(500).json({ error: "GEMINI_API_KEY not configured on server." });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: "GROQ_API_KEY not configured on server." });
   }
 
-  const chatHistory   = history.slice(0, -1);
-  const latestMessage = history[history.length - 1].parts[0].text;
+  // Convert Gemini-format history to OpenAI/Groq format
+  const messages = [
+    { role: "system", content: buildSystemPrompt() },
+    ...history.map(h => ({
+      role: h.role === "model" ? "assistant" : "user",
+      content: h.parts[0].text,
+    }))
+  ];
 
-  const delay = ms => new Promise(r => setTimeout(r, ms));
+  try {
+    const completion = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages,
+      max_tokens: 300,
+      temperature: 0.75,
+    });
 
-  let lastErr = null;
+    const reply = completion.choices[0]?.message?.content?.trim() || "";
 
-  for (const model of MODEL_FALLBACKS) {
-    // Retry each model up to 2 times before moving to next
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const chat = genAI.chats.create({
-          model,
-          config: {
-            systemInstruction: buildSystemPrompt(),
-            maxOutputTokens: 1024,
-            temperature: 0.75,
-            topP: 0.9,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-          history: chatHistory,
-        });
-
-        const result = await chat.sendMessage({ message: latestMessage });
-        const reply  = extractText(result);
-
-        if (!reply) {
-          console.warn(`⚠️  ${model} attempt ${attempt}: empty reply (${result.candidates?.[0]?.finishReason})`);
-          if (attempt < 2) await delay(800);
-          continue;
-        }
-
-        console.log(`✅ ${model} (attempt ${attempt}): ${reply.slice(0, 80)}`);
-        return res.json({ reply, model });
-
-      } catch (err) {
-        const body = err.message || "";
-        const isRetryable =
-          body.includes("503") || body.includes("UNAVAILABLE") ||
-          body.includes("404") || body.includes("no longer available") ||
-          body.includes("NOT_FOUND");
-
-        console.warn(`⚠️  ${model} attempt ${attempt} failed: ${body.slice(0, 90)}`);
-        lastErr = err;
-
-        if (!isRetryable) { break; }           // auth/quota error — skip all retries
-        if (attempt < 2)  { await delay(1000); } // wait 1s before retry
-      }
+    if (!reply) {
+      return res.status(500).json({ error: "Empty response from Groq" });
     }
-  }
 
-  const errMsg = lastErr?.message || "All Gemini models unavailable";
-  console.error("All models exhausted:", errMsg.slice(0, 100));
-  res.status(500).json({ error: errMsg });
+    console.log(`✅ Groq (${GROQ_MODEL}): ${reply.slice(0, 80)}`);
+    return res.json({ reply, model: GROQ_MODEL });
+
+  } catch (err) {
+    const errMsg = err.message || "Groq API error";
+    console.error("Groq error:", errMsg.slice(0, 100));
+    res.status(500).json({ error: errMsg });
+  }
 });
 
 // ─── GET /api/seller-data — expose non-sensitive seller data to frontend ──────
